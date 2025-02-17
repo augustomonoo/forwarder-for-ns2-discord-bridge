@@ -19,6 +19,7 @@ type ForwardServer struct {
 }
 
 func getForwardServers() map[string][]ForwardServer {
+	// TODO This should be loaded from a config file
 	return map[string][]ForwardServer{
 		"server1": {{"http://localhost:8000", "banana"}, {"http://localhost:8000", "phone"}},
 		"server2": {{"http://localhost:8000", "discord_server_1"}, {"http://localhost:8000/discbridge", "discord_server_2"}},
