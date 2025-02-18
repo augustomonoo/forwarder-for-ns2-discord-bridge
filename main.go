@@ -1,28 +1,36 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 )
 
-var serverList map[string][]ForwardServer
-
-// TODO check if the field that needs replacing is 'server'
-var formFieldToReplace = "server"
-
-type ForwardServer struct {
-	url       string
-	server_id string
+type Endpoint struct {
+	Endpoint string
+	IDs      []string
+	Servers  []string
 }
 
-func getForwardServers() map[string][]ForwardServer {
-	// TODO This should be loaded from a config file
-	return map[string][]ForwardServer{
-		"server1": {{"http://localhost:8000", "banana"}, {"http://localhost:8000", "phone"}},
-		"server2": {{"http://localhost:8000", "discord_server_1"}, {"http://localhost:8000/discbridge", "discord_server_2"}},
+type Config struct {
+	BindAddress    string
+	BindPort       int
+	FieldToReplace string
+	Endpoints      []Endpoint
+}
+
+var (
+	CONFIGURATION Config
+	config_path   = "config.json"
+)
+
+func loadConfig(b []byte, c *Config) {
+	if err := json.Unmarshal(b, &c); err != nil {
+		log.Fatal(err)
 	}
 }
 
@@ -37,14 +45,13 @@ func cloneFormData(data url.Values) url.Values {
 func sendData(url string, data url.Values) *http.Response {
 	res, err := http.PostForm(url, data)
 	if err != nil {
-		fmt.Printf("ERROR sending data to %s\n", url)
-		fmt.Printf("%s", err)
+		log.Printf("ERROR sending data to %s\n", url)
+		log.Printf("%s", err)
 	}
-	fmt.Printf("%d\n", res.StatusCode)
 	return res
 }
 
-func receiveAndForward(r *http.Request, forwardServers []ForwardServer) {
+func receiveAndForward(r *http.Request, endpoint Endpoint) {
 	// Data is received through a POST form
 	r.ParseForm()
 	if r.Form == nil {
@@ -52,10 +59,14 @@ func receiveAndForward(r *http.Request, forwardServers []ForwardServer) {
 		return
 	}
 	// Maybe check to only process POST requests
-	for _, forwardServer := range forwardServers {
-		formData := cloneFormData(r.Form)
-		formData[formFieldToReplace] = []string{forwardServer.server_id}
-		sendData(forwardServer.url, formData)
+	for _, id := range endpoint.IDs {
+		for _, url := range endpoint.Servers {
+			formData := cloneFormData(r.Form)
+			formData[CONFIGURATION.FieldToReplace] = []string{id}
+			log.Printf("[%s] %s => [%s]", endpoint.Endpoint, url, id)
+			response := sendData(url, formData)
+			log.Printf("[%s] %s => [%s]: %d", endpoint.Endpoint, url, id, response.StatusCode)
+		}
 	}
 }
 
@@ -68,26 +79,42 @@ func handleEndpoint(w http.ResponseWriter, r *http.Request) {
 	// /endpoint => endpoint
 	requested_endpoint := r.URL.Path[1:]
 
-	forwardServerList, ok := serverList[requested_endpoint]
-	if ok {
-		receiveAndForward(r, forwardServerList)
-	} else {
-		fmt.Printf("Received request for undefined endpoint: '%s'\n", requested_endpoint)
+	found := false
+	for _, endpoint := range CONFIGURATION.Endpoints {
+		if requested_endpoint == endpoint.Endpoint {
+			found = true
+			log.Printf("[%s] new request %s", endpoint.Endpoint, r.RemoteAddr)
+			receiveAndForward(r, endpoint)
+		}
+	}
+	if !found {
+		log.Printf("Received request for non existing endpoint '%s'", requested_endpoint)
 	}
 }
 
 func main() {
-	serverList = getForwardServers()
+	file_content, err := os.ReadFile("config.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	loadConfig(file_content, &CONFIGURATION)
+
 	// Just print the loaded servers
-	for endpoint, server := range serverList {
-		fmt.Printf("Servers for endpoint '%s':\n", endpoint)
-		for i, forward_server := range server {
-			fmt.Printf("  [%d] url: '%s', server_id: '%s'\n", i, forward_server.url, forward_server.server_id)
+	for _, endpoint := range CONFIGURATION.Endpoints {
+		log.Printf("Endpoint: '%s'\n", endpoint.Endpoint)
+		log.Println("  Server IDs:")
+		for i, id := range endpoint.IDs {
+			log.Printf("   [%d]: %s\n", i, id)
+		}
+		log.Println("  Discord Bridge Servers:")
+		for i, url := range endpoint.Servers {
+			log.Printf("   [%d]: %s\n", i, url)
 		}
 	}
-
+	addr := fmt.Sprintf("%s:%d", CONFIGURATION.BindAddress, CONFIGURATION.BindPort)
+	log.Printf("Listening on %s", addr)
 	http.HandleFunc("/", handleEndpoint)
-	err := http.ListenAndServe(":3333", nil)
+	err = http.ListenAndServe(addr, nil)
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("Server closed\n")
 	} else if err != nil {
