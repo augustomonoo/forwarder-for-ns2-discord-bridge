@@ -1,0 +1,17 @@
+{
+  "BindAddress": "0.0.0.0",
+  "BindPort": 3000,
+  "FieldToReplace": "id",
+  "Endpoints": [
+    {
+      "Endpoint": "endpoint_1",
+      "IDs": ["server1", "server2"],
+      "Servers": ["http://localhost:8000/discbridge"]
+    },
+    {
+      "Endpoint": "endpoint_2",
+      "IDs": ["server3"],
+      "Servers": ["http://localhost:8000/discbridge"]
+    }
+  ]
+}
